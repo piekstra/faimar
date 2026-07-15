@@ -87,7 +87,9 @@
   }
 
   /* Linear interpolation of the sparse fair-value points onto the price
-   * date axis. Dates before the first known point get null (honest gap). */
+   * date axis. Outside the known points the nearest value extends flat, so
+   * the line always spans the full chart (a single point — e.g. an analyst
+   * target with no history — becomes a horizontal reference line). */
   function interpolateFair(dates, points) {
     if (!points.length) return { line: dates.map(() => null), markers: dates.map(() => null) };
     const times = points.map(([d]) => Date.parse(d));
@@ -95,7 +97,7 @@
     const markerByDate = new Map(points.map(([d, v]) => [d, v]));
     const line = dates.map((d) => {
       const t = Date.parse(d);
-      if (t < times[0]) return null;
+      if (t < times[0]) return values[0];
       if (t >= times[times.length - 1]) return values[values.length - 1];
       let i = 0;
       while (t > times[i + 1]) i++;
@@ -356,9 +358,9 @@
     if (!payload) return;
     setText("chart-subtitle",
       payload.method === "dcf"
-        ? "Green wash: price below estimated fair value (upside). Red wash: price above it."
+        ? "Green wash: price below estimated fair value (upside). Red wash: price above it. Dots mark reported fiscal years."
         : payload.method === "analyst_target"
-          ? "Fair value shown for today only — analyst targets have no free history."
+          ? "Fair value line is today's analyst-consensus estimate applied across the range — targets have no free history. Green wash: upside; red: downside."
           : "No fair value estimate available for this symbol.");
     renderTiles();
     renderChart();
