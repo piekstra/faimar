@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>faimar — fair market value</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface-1: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-price: #2a78d6;      /* categorical slot 1: blue */
+    --series-fair: #008300;       /* categorical slot 2: green */
+    --status-good: #0ca30c;
+    --status-critical: #d03b3b;
+    --delta-good: #006300;
+    --delta-bad: #d03b3b;
+    --wash-under: rgba(12, 163, 12, 0.10);   /* price below fair value */
+    --wash-over: rgba(208, 59, 59, 0.10);    /* price above fair value */
+    --accent: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface-1: #1a1a19;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-price: #3987e5;
+      --series-fair: #008300;
+      --delta-good: #0ca30c;
+      --delta-bad: #d03b3b;
+      --accent: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-price: #3987e5;
+    --series-fair: #008300;
+    --delta-good: #0ca30c;
+    --delta-bad: #d03b3b;
+    --accent: #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 24px 20px 56px; }
+
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+  .brand { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .brand small { font-weight: 400; color: var(--text-muted); font-size: 13px; margin-left: 8px; }
+  #theme-toggle {
+    margin-left: auto; border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-secondary); border-radius: 8px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 13px;
+  }
+
+  form { display: flex; gap: 8px; margin-bottom: 20px; }
+  #symbol {
+    flex: 0 1 220px; padding: 9px 12px; font: inherit; text-transform: uppercase;
+    border: 1px solid var(--baseline); border-radius: 8px;
+    background: var(--surface-1); color: var(--text-primary);
+  }
+  #symbol:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  form button {
+    padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer;
+    border: none; border-radius: 8px; background: var(--accent); color: #fff;
+  }
+
+  #message { color: var(--text-secondary); min-height: 1.5em; margin: 0 0 8px; }
+  #message.error { color: var(--status-critical); }
+
+  #dashboard { transition: opacity 0.15s; }
+  #dashboard.loading { opacity: 0.55; pointer-events: none; }
+  #dashboard.empty { display: none; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .tile .label { font-size: 13px; color: var(--text-secondary); }
+  .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  .tile .sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .value.up { color: var(--delta-good); }
+  .value.down { color: var(--delta-bad); }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; margin-top: 8px; }
+  .badge .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 18px 10px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .card .subtitle { font-size: 13px; color: var(--text-muted); margin: 2px 0 0; }
+  .chart-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .ranges { margin-left: auto; display: flex; gap: 4px; }
+  .ranges button {
+    font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: 6px;
+  }
+  .ranges button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chart-box { position: relative; height: 380px; }
+
+  details { margin: 4px 0 12px; color: var(--text-secondary); }
+  summary { cursor: pointer; font-size: 13px; color: var(--text-muted); }
+  table { border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  th, td { text-align: right; padding: 4px 14px 4px 0; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--gridline); }
+
+  .assumptions dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 16px; margin: 8px 0; font-size: 13px; }
+  .assumptions dt { color: var(--text-muted); }
+  .assumptions dd { margin: 0; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  footer { font-size: 12px; color: var(--text-muted); margin-top: 24px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">faimar<small>fair market value</small></div>
+    <button id="theme-toggle" type="button" aria-label="Toggle color theme">◐ theme</button>
+  </header>
+
+  <form id="lookup">
+    <input id="symbol" name="symbol" placeholder="Symbol, e.g. AAPL" autocomplete="off"
+           spellcheck="false" maxlength="12" aria-label="Ticker symbol" required>
+    <button type="submit">Evaluate</button>
+  </form>
+
+  <p id="message" role="status">Enter a ticker symbol to see its estimated fair value.</p>
+
+  <div id="dashboard" class="empty">
+    <div class="tiles">
+      <div class="tile">
+        <div class="label">Current price</div>
+        <div class="value" id="tile-price">—</div>
+        <div class="sub" id="tile-price-sub"></div>
+      </div>
+      <div class="tile">
+        <div class="label">Estimated fair value</div>
+        <div class="value" id="tile-fair">—</div>
+        <div class="sub" id="tile-fair-sub"></div>
+      </div>
+      <div class="tile">
+        <div class="label">Estimated upside</div>
+        <div class="value" id="tile-upside">—</div>
+        <div class="sub">fair value vs current price</div>
+      </div>
+      <div class="tile">
+        <div class="label">Verdict</div>
+        <div class="badge" id="tile-verdict"></div>
+        <div class="sub">±20% band around fair value</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="chart-head">
+        <div>
+          <h2 id="chart-title">Share price vs fair value</h2>
+          <p class="subtitle" id="chart-subtitle"></p>
+        </div>
+        <div class="ranges" role="group" aria-label="Date range">
+          <button data-range="1" aria-pressed="false">1Y</button>
+          <button data-range="3" aria-pressed="false">3Y</button>
+          <button data-range="5" aria-pressed="true">5Y</button>
+        </div>
+      </div>
+      <div class="chart-box"><canvas id="chart" role="img" aria-label="Line chart of share price versus estimated fair value over time"></canvas></div>
+      <details>
+        <summary>Data table</summary>
+        <div id="table-view"></div>
+      </details>
+    </div>
+
+    <div class="card assumptions">
+      <h2>Model assumptions</h2>
+      <p class="subtitle" id="method-note"></p>
+      <dl id="assumptions-list"></dl>
+    </div>
+
+    <footer>
+      Estimates are generated from public Yahoo Finance data with a simplified two-stage discounted-cash-flow
+      model. Historical fair values reuse today's growth and discount assumptions against each year's reported
+      fundamentals. This is not investment advice.
+      · <a href="https://github.com/piekstra/faimar">source</a>
+    </footer>
+  </div>
+</div>
+<script src="/vendor/chart.umd.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
