@@ -69,6 +69,14 @@ def fetch_fundamentals(symbol: str) -> dict:
     if fcf_ttm is None and annual_fcf:
         fcf_ttm = annual_fcf[max(annual_fcf)]
 
+    # Rolling four-quarter FCF sums give point-in-time TTM values at each
+    # reported quarter-end, densifying the recent fair value history.
+    qdates = sorted(quarterly_fcf)
+    fcf_ttm_by_quarter = {
+        qdates[i]: sum(quarterly_fcf[d] for d in qdates[i - 3 : i + 1])
+        for i in range(3, len(qdates))
+    }
+
     # Historical diluted share counts let us compute per-share fair value
     # for past years without survivorship from buybacks/dilution.
     shares_by_year = _row_series(_safe(lambda: t.income_stmt), "Diluted Average Shares")
@@ -81,6 +89,7 @@ def fetch_fundamentals(symbol: str) -> dict:
         "shares_outstanding": _clean(info.get("sharesOutstanding")),
         "fcf_ttm": fcf_ttm,
         "annual_fcf": annual_fcf,
+        "fcf_ttm_by_quarter": fcf_ttm_by_quarter,
         "shares_by_year": shares_by_year,
         "growth_estimate": _growth_estimate(t, info, annual_fcf),
         "analyst": {

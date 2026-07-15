@@ -44,6 +44,7 @@
       baseline: get("--baseline"),
       price: get("--series-price"),
       fair: get("--series-fair"),
+      target: get("--series-target"),
       washUnder: get("--wash-under"),
       washOver: get("--wash-over"),
     };
@@ -86,23 +87,23 @@
     return prices.filter(([d]) => d >= iso);
   }
 
-  /* Linear interpolation of the sparse fair-value points onto the price
-   * date axis. Outside the known points the nearest value extends flat, so
-   * the line always spans the full chart (a single point — e.g. an analyst
-   * target with no history — becomes a horizontal reference line). */
-  function interpolateFair(dates, points) {
+  /* Project sparse revision points onto the price date axis as a step
+   * function: each estimate holds until the next revision, the way these
+   * series actually behave. Dates before the first revision are null —
+   * no invented history — except for a single lone point, which extends
+   * across the chart as an explicit "today's estimate" reference line. */
+  function stepSeries(dates, points) {
     if (!points.length) return { line: dates.map(() => null), markers: dates.map(() => null) };
     const times = points.map(([d]) => Date.parse(d));
     const values = points.map(([, v]) => v);
     const markerByDate = new Map(points.map(([d, v]) => [d, v]));
+    const extendBack = points.length === 1;
+    let idx = 0;
     const line = dates.map((d) => {
       const t = Date.parse(d);
-      if (t < times[0]) return values[0];
-      if (t >= times[times.length - 1]) return values[values.length - 1];
-      let i = 0;
-      while (t > times[i + 1]) i++;
-      const f = (t - times[i]) / (times[i + 1] - times[i]);
-      return values[i] + f * (values[i + 1] - values[i]);
+      while (idx + 1 < times.length && times[idx + 1] <= t) idx++;
+      if (t < times[idx] && !extendBack) return null;
+      return values[idx];
     });
     // Snap each fair-value point to the nearest plotted date so markers land on the axis.
     const markers = dates.map(() => null);
@@ -145,9 +146,14 @@
     const prices = sliceRange(payload.history.prices, rangeYears);
     const dates = prices.map(([d]) => d);
     const closes = prices.map(([, v]) => v);
-    const { line: fairLine, markers } = interpolateFair(dates, payload.history.fair_values);
+    const { line: fairLine, markers } = stepSeries(dates, payload.history.fair_values);
     const hasFair = fairLine.some((v) => v !== null);
     const currency = payload.currency;
+
+    // The consensus line duplicates fair value when fair value IS the
+    // consensus, so it only appears alongside a DCF-based fair value.
+    const targetPoints = payload.method === "dcf" ? payload.history.analyst_targets ?? [] : [];
+    const targetLine = targetPoints.length >= 2 ? stepSeries(dates, targetPoints).line : null;
 
     if (chart) chart.destroy();
     chart = new Chart($("chart"), {
@@ -188,6 +194,17 @@
             pointBorderColor: t.surface,
             pointBorderWidth: 2,
           },
+          ...(targetLine
+            ? [{
+                label: "Analyst price target",
+                data: targetLine,
+                borderColor: t.target,
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 0,
+                tension: 0,
+              }]
+            : []),
         ],
       },
       plugins: [crosshair],
@@ -297,23 +314,26 @@
     const container = $("table-view");
     container.textContent = "";
     const table = document.createElement("table");
+    const stepAt = (points, iso) => {
+      let last = null;
+      for (const [d, v] of points) { if (d <= iso) last = v; else break; }
+      return last;
+    };
+    const targets = payload.method === "dcf" ? payload.history.analyst_targets ?? [] : [];
     const head = table.insertRow();
-    for (const h of ["Date", "Estimated fair value", "Share price"]) {
+    const headers = ["Date", "Estimated fair value", "Share price"];
+    if (targets.length) headers.push("Analyst target");
+    for (const h of headers) {
       const th = document.createElement("th");
       th.textContent = h;
       head.append(th);
     }
-    const prices = payload.history.prices;
-    const priceOn = (iso) => {
-      let last = null;
-      for (const [d, v] of prices) { if (d <= iso) last = v; else break; }
-      return last;
-    };
     for (const [date, fv] of payload.history.fair_values) {
       const row = table.insertRow();
       row.insertCell().textContent = date;
       row.insertCell().textContent = money(fv, c);
-      row.insertCell().textContent = money(priceOn(date), c);
+      row.insertCell().textContent = money(stepAt(payload.history.prices, date), c);
+      if (targets.length) row.insertCell().textContent = money(stepAt(targets, date), c);
     }
     container.append(table);
   }
@@ -357,11 +377,10 @@
   function render() {
     if (!payload) return;
     setText("chart-subtitle",
-      payload.method === "dcf"
-        ? "Green wash: price below estimated fair value (upside). Red wash: price above it. Dots mark reported fiscal years."
-        : payload.method === "analyst_target"
-          ? "Fair value line is today's analyst-consensus estimate applied across the range — targets have no free history. Green wash: upside; red: downside."
-          : "No fair value estimate available for this symbol.");
+      payload.method !== "unavailable"
+        ? "Green wash: price below estimated fair value (upside). Red wash: price above it. " +
+          "The fair value line steps at each revision — dots mark reported fundamentals and recorded estimate changes."
+        : "No fair value estimate available for this symbol.");
     renderTiles();
     renderChart();
     renderTable();

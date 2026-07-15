@@ -99,6 +99,18 @@ def test_low_fcf_yield_prefers_analyst_target():
     assert len(result["history"]["fair_values"]) == 1
 
 
+def test_analyst_target_method_replays_consensus_history():
+    history = [["2025-08-01", 20.0], ["2026-01-01", 40.0], ["2026-06-01", 88.0]]
+    result = build_valuation(
+        fundamentals(fcf_ttm=10_000_000), PRICES, 0.045, target_history=history
+    )
+    assert result["method"] == "analyst_target"
+    # Three consensus revisions plus today's estimate.
+    assert len(result["history"]["fair_values"]) == 4
+    assert result["history"]["fair_values"][0] == ["2025-08-01", 20.0]
+    assert result["history"]["analyst_targets"] == history
+
+
 def test_build_valuation_handles_no_data():
     funds = fundamentals(
         fcf_ttm=None,

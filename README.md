@@ -8,9 +8,14 @@ Wall St / Morningstar publish, built entirely on free data.
 
 ## How it works
 
-- **Data source:** Yahoo Finance via [`yfinance`](https://github.com/ranaroussi/yfinance)
-  — free, no API key. Price history, cash flow statements, analyst growth estimates
-  and price targets, beta, share counts.
+- **Data sources (free, no API keys):**
+  - Yahoo Finance via [`yfinance`](https://github.com/ranaroussi/yfinance) — price
+    history, cash flow statements, analyst growth estimates and price targets,
+    beta, share counts.
+  - Nasdaq's public site API (`api.nasdaq.com/api/analyst/{symbol}/targetprice`)
+    — roughly a year of monthly analyst consensus price-target history, the
+    free equivalent of the stepped "fair value revisions" line the paid
+    platforms chart.
 - **Fair value model:** a two-stage discounted cash flow on levered free cash flow
   (the same family of model behind the charts that inspired this):
   1. Start from trailing-twelve-month free cash flow.
@@ -23,10 +28,17 @@ Wall St / Morningstar publish, built entirely on free data.
   All inputs are clamped to sane ranges (see `app/config.py`). If free cash flow is
   negative — common for growth companies — fair value falls back to the **mean
   analyst price target**, and the UI labels it as such.
-- **Historical fair value line:** the same model run against each past fiscal
-  year's reported FCF and that year's diluted share count. Today's growth and
-  discount assumptions are held constant across history (point-in-time estimates
-  aren't available for free); the UI discloses this.
+- **Historical fair value line** (a step function — each estimate holds until
+  revised) is assembled from three free layers:
+  1. *DCF replay:* the model re-run against each past fiscal year's reported FCF
+     (and rolling four-quarter TTM values) with that period's diluted share
+     count. Today's growth and discount assumptions are held constant across
+     history (point-in-time estimates aren't free); the UI discloses this.
+  2. *Consensus replay:* when fair value comes from analyst targets, Nasdaq's
+     monthly consensus history provides the past revisions.
+  3. *Faimar's own log:* every computed estimate is recorded (SQLite) once per
+     day, so the site accumulates its own revision history the longer it runs —
+     the same way the paid platforms built theirs.
 - **Upside:** `(fair value − current price) / current price`, with a ±20% band
   for the undervalued / fair / overvalued verdict.
 

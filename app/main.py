@@ -8,6 +8,7 @@ API:
 """
 
 import re
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -16,11 +17,13 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .cache import Cache
-from .providers import yahoo
-from .valuation import build_valuation
+from .history import FairValueLog
+from .providers import nasdaq, yahoo
+from .valuation import build_valuation, merge_fair_value_history
 
 app = FastAPI(title="faimar", version="0.1.0")
 cache = Cache(config.CACHE_PATH)
+fair_value_log = FairValueLog(config.CACHE_PATH)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SYMBOL_RE = re.compile(r"^[A-Za-z0-9.^=-]{1,12}$")
@@ -48,7 +51,28 @@ def valuation(symbol: str) -> dict:
         "risk_free", config.TTL_RISK_FREE, yahoo.fetch_risk_free
     )
 
-    payload = build_valuation(fundamentals, prices, risk_free.get("risk_free"))
+    # Best-effort: consensus target history is enrichment, never a blocker.
+    try:
+        targets, _ = cache.fetch(
+            f"targets:{sym}",
+            config.TTL_FUNDAMENTALS,
+            lambda: nasdaq.fetch_target_history(sym),
+        )
+    except Exception:
+        targets = {"history": []}
+
+    payload = build_valuation(
+        fundamentals, prices, risk_free.get("risk_free"), targets.get("history")
+    )
+
+    # Record today's estimate and fold past recorded revisions into the
+    # chart history — the step line grows richer the longer faimar runs.
+    if payload["fair_value"] is not None:
+        fair_value_log.record(sym, str(date.today()), payload["fair_value"], payload["method"])
+    payload["history"]["fair_values"] = merge_fair_value_history(
+        payload["history"]["fair_values"], fair_value_log.series(sym)
+    )
+
     payload["cache"] = {
         "fundamentals_age_s": round(fundamentals_age),
         "prices_age_s": round(prices_age),

@@ -78,7 +78,12 @@ def verdict(upside_pct: float | None) -> str:
     return "fair"
 
 
-def build_valuation(fundamentals: dict, prices: dict, risk_free: float | None) -> dict:
+def build_valuation(
+    fundamentals: dict,
+    prices: dict,
+    risk_free: float | None,
+    target_history: list[list] | None = None,
+) -> dict:
     rf = risk_free if risk_free is not None else config.DEFAULT_RISK_FREE
     terminal_growth = min(rf, config.TERMINAL_GROWTH_CAP)
 
@@ -145,14 +150,20 @@ def build_valuation(fundamentals: dict, prices: dict, risk_free: float | None) -
         "analyst": fundamentals.get("analyst", {}),
         "history": {
             "prices": prices["prices"],
-            # The historical line only makes sense for the DCF method; an
-            # analyst-target fair value has no free history, so it plots as
-            # a single present-day point.
+            # DCF fair values replay reported fundamentals; analyst-target
+            # fair values replay the consensus revision history (Nasdaq),
+            # ending at today's estimate.
             "fair_values": (
                 fair_value_history(fundamentals, growth, terminal_growth, rate, fair_value)
                 if method == "dcf"
-                else [[str(date.today()), round(fair_value, 2)]] if fair_value else []
+                else merge_fair_value_history(
+                    target_history or [],
+                    [[str(date.today()), round(fair_value, 2)]] if fair_value else [],
+                )
             ),
+            # The consensus series also ships on its own so the UI can draw
+            # it as a separate line when fair value comes from the DCF.
+            "analyst_targets": target_history or [],
         },
     }
 
@@ -174,16 +185,29 @@ def fair_value_history(
     """
     shares_by_year = fundamentals.get("shares_by_year", {})
     current_shares = fundamentals.get("shares_outstanding")
+    base_fcfs: dict[str, float] = dict(fundamentals.get("annual_fcf", {}))
+    # Quarterly TTM values overwrite annual ones on matching dates and add
+    # steps between fiscal years where quarterly reports exist.
+    base_fcfs.update(fundamentals.get("fcf_ttm_by_quarter", {}))
     points: list[list] = []
-    for year_end, fcf in sorted(fundamentals.get("annual_fcf", {}).items()):
-        shares = shares_by_year.get(year_end) or current_shares
+    for period_end, fcf in sorted(base_fcfs.items()):
+        shares = shares_by_year.get(period_end) or current_shares
         if not shares:
             continue
         fv = dcf_fair_value(
             DcfInputs(fcf, growth, terminal_growth, rate, shares)
         )
         if fv is not None:
-            points.append([year_end, round(fv, 2)])
+            points.append([period_end, round(fv, 2)])
     if current_fair_value is not None:
         points.append([str(date.today()), round(current_fair_value, 2)])
     return points
+
+
+def merge_fair_value_history(model_points: list[list], logged_points: list[list]) -> list[list]:
+    """Combine model-reconstructed history with faimar's own recorded
+    estimates; on date collisions the recorded value wins (it is what
+    faimar actually said that day)."""
+    merged = {d: v for d, v in model_points}
+    merged.update({d: v for d, v in logged_points})
+    return [[d, merged[d]] for d in sorted(merged)]
