@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Fair market value explorer — estimated fair value vs share price for any ticker"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "AGPL-3.0-only"
 authors = [{ name = "Caleb Piekstra" }]
 dependencies = [
     "fastapi>=0.110",
